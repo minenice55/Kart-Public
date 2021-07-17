@@ -192,6 +192,8 @@ static void M_HandleServerPage(INT32 choice);
 void M_SetWaitingMode(int mode);
 int  M_GetWaitingMode(void);
 
+int MapGridSelectToSkin(UINT8 selx, UINT8 sely);
+
 // the haxor message menu
 menu_t MessageDef;
 
@@ -1452,6 +1454,8 @@ static menuitem_t OP_HUDOptionsMenu[] =
 	{IT_STRING | IT_CVAR, NULL,	"Console Text Size",		&cv_constextsize,		120},
 
 	{IT_STRING | IT_CVAR, NULL,   "Show \"FOCUS LOST\"",  &cv_showfocuslost,   135},
+
+	{IT_STRING | IT_CVAR, NULL,	"2D character select",		&cv_skinselectmenu,		145},
 };
 
 // Ok it's still called chatoptions but we'll put ping display in here to be clean
@@ -2691,8 +2695,8 @@ boolean M_Responder(event_t *ev)
 				M_QuitSRB2(0);
 				return true;
 
-			case KEY_F11: // Gamma Level
-				CV_AddValue(&cv_usegamma, 1);
+			case KEY_F11: // Fullscreen
+				CV_AddValue(&cv_fullscreen, 1);
 				return true;
 
 			// Spymode on F12 handled in game logic
@@ -9350,9 +9354,33 @@ static consvar_t *setupm_cvname;
 static INT32      setupm_fakeskin;
 static INT32      setupm_fakecolor;
 
+//fucked with by minenice
+//callmore's skin select stuff taken with permission
+static UINT8      setupm_skinxpos;
+static UINT8 	  setupm_skinypos;
+static UINT8 	  setupm_skinydrag;
+
+static INT32	  setupm_skinselect;
+static boolean	  setupm_skinlockedselect;
+
+//width now 9 so we can make moe's "2D" grid just an option in the normal grid
+#define SKINGRIDWIDTH 9
+#define SKINGRIDHEIGHT 6
+
+static char *sortNames[] = {
+	"Name",
+	"Internal name",
+	"Speed",
+	"Weight",
+	//"Stat Grid",
+	"Preferred color",
+	"ID"
+};
+
 static void M_DrawSetupMultiPlayerMenu(void)
 {
 	INT32 mx, my, st, flags = 0;
+	//INT32 tw = 0;
 	spritedef_t *sprdef;
 	spriteframe_t *sprframe;
 	patch_t *statbg = W_CachePatchName("K_STATBG", PU_CACHE);
@@ -9364,85 +9392,277 @@ static void M_DrawSetupMultiPlayerMenu(void)
 	UINT8 speed;
 	UINT8 weight;
 	UINT8 i;
+	UINT8 s;
 	const UINT8 *flashcol = V_GetStringColormap(highlightflags);
 	INT32 statx, staty;
+	INT32 nameboxy;
+	INT32 skintodisplay;
 
 	mx = MP_PlayerSetupDef.x;
 	my = MP_PlayerSetupDef.y;
 
-	statx = (BASEVIDWIDTH - mx - 118);
-	staty = (my+62);
-
 	// use generic drawer for cursor, items and title
 	M_DrawGenericMenu();
 
+	statx = (BASEVIDWIDTH - mx - 118);
+	staty = (my + 62);
+	
+	switch (cv_skinselectmenu.value)
+	{
+		case SKINMENUTYPE_GRID:
+			nameboxy = 6;
+			staty++;
+			skintodisplay = (itemOn == 1 && setupm_skinselect < numskins ? setupm_skinselect : setupm_fakeskin);
+			break;
+		default:
+			nameboxy = 0;
+			skintodisplay = setupm_fakeskin;
+			break;
+	}
+
+#define SKINXSHIFT 37
+
+	//background and scroll bar for grid skin select
+	if (cv_skinselectmenu.value == SKINMENUTYPE_GRID)
+	{
+		INT32 x = ((BASEVIDWIDTH / 2) - (18 * SKINGRIDWIDTH) - 8) + 100 + SKINXSHIFT - 1;
+		INT32 y = ((BASEVIDHEIGHT / 2) - (18 * (SKINGRIDWIDTH/2))) - 1;
+
+		INT32 dx = (SKINGRIDWIDTH * 18);
+		INT32 dy = (SKINGRIDHEIGHT * 18);
+		INT32 scrx = 4; //2 is added to make the final "thickness"
+
+		int listlen;
+		int barlen;
+		int barpos;
+		
+		listlen = (numskins)/SKINGRIDWIDTH;
+
+		//draw BG
+		V_DrawFill(x, y, dx, dy, 244);
+
+		//draw scroll bar "back"
+		x += dx + 14;
+		V_DrawFill(x, y, scrx+2, dy, 9);
+		V_DrawFill(x, y, 1, dy, 10);
+		V_DrawFill(x, y + dy - 1, scrx+2, 1, 10);
+		x++;
+		y++;
+		dy -= 2;
+		V_DrawFill(x, y, scrx, dy, 15);
+
+		//draw scroll bar bar
+		if ((numskins) % SKINGRIDWIDTH > 0)
+			listlen++;
+		if (listlen - SKINGRIDHEIGHT > 0)
+			barlen = dy/(listlen-SKINGRIDHEIGHT + 1);
+		else
+			barlen = dy;
+		barpos = barlen * setupm_skinydrag;
+
+		if (setupm_skinydrag >= listlen - SKINGRIDHEIGHT)
+			barlen = dy - barpos;
+
+		V_DrawFill(x, y + barpos, scrx, barlen, 5);
+		V_DrawFill(x, y + barpos, 1, barlen, 7);
+		V_DrawFill(x, y + barpos + barlen - 1, scrx, 1, 7);
+	}
+
 	// draw name string
-	M_DrawTextBox(mx + 32, my - 8, MAXPLAYERNAME, 1);
-	V_DrawString(mx + 40, my, V_ALLOWLOWERCASE, setupm_name);
+	M_DrawTextBox(mx + 32, my - 8 + nameboxy, MAXPLAYERNAME, 1);
+	V_DrawString(mx + 40, my + nameboxy, V_ALLOWLOWERCASE, setupm_name);
 
 	// draw text cursor for name
 	if (!itemOn && skullAnimCounter < 4) // blink cursor
-		V_DrawCharacter(mx + 40 + V_StringWidth(setupm_name, V_ALLOWLOWERCASE), my, '_',false);
+		V_DrawCharacter(mx + 40 + V_StringWidth(setupm_name, V_ALLOWLOWERCASE), my + nameboxy, '_',false);
 
 	// draw skin string
-	st = V_StringWidth(skins[setupm_fakeskin].realname, 0);
-	V_DrawString(BASEVIDWIDTH - mx - st, my + 16,
-	             ((MP_PlayerSetupMenu[2].status & IT_TYPE) == IT_SPACE ? V_TRANSLUCENT : 0)|highlightflags|V_ALLOWLOWERCASE,
-	             skins[setupm_fakeskin].realname);
-	if (itemOn == 1)
+	st = V_StringWidth(skins[skintodisplay].realname, 0);
+	switch (cv_skinselectmenu.value)
 	{
-		V_DrawCharacter(BASEVIDWIDTH - mx - 10 - st - (skullAnimCounter/5), my + 16,
-			'\x1C' | highlightflags, false); // left arrow
-		V_DrawCharacter(BASEVIDWIDTH - mx + 2 + (skullAnimCounter/5), my + 16,
-			'\x1D' | highlightflags, false); // right arrow
+		case SKINMENUTYPE_GRID:
+			//tw = V_StringWidth("Character", 0);//V_StringWidth(GETSELECTEDSKINNAME, 0);
+			st = V_StringWidth(skins[skintodisplay].realname, 0);
+			V_DrawString(mx + 54 + (72/2), my+65+76,
+				((MP_PlayerSetupMenu[2].status & IT_TYPE) == IT_SPACE ? V_TRANSLUCENT : 0) | highlightflags | V_ALLOWLOWERCASE,
+				skins[skintodisplay].realname);
+			break;
+		default:
+			V_DrawString(BASEVIDWIDTH - mx - st, my + 16,
+						((MP_PlayerSetupMenu[2].status & IT_TYPE) == IT_SPACE ? V_TRANSLUCENT : 0)|highlightflags|V_ALLOWLOWERCASE,
+						skins[skintodisplay].realname);
+			if (itemOn == 1)
+			{
+				V_DrawCharacter(BASEVIDWIDTH - mx - 10 - st - (skullAnimCounter/5), my + 16,
+					'\x1C' | highlightflags, false); // left arrow
+				V_DrawCharacter(BASEVIDWIDTH - mx + 2 + (skullAnimCounter/5), my + 16,
+					'\x1D' | highlightflags, false); // right arrow
+			}
+			break;
 	}
 
 	// draw the name of the color you have chosen
 	// Just so people don't go thinking that "Default" is Green.
 	st = V_StringWidth(KartColor_Names[setupm_fakecolor], 0);
-	V_DrawString(BASEVIDWIDTH - mx - st, my + 152, highlightflags|V_ALLOWLOWERCASE, KartColor_Names[setupm_fakecolor]);	// SRB2kart
-	if (itemOn == 2)
+	switch (cv_skinselectmenu.value)
 	{
-		V_DrawCharacter(BASEVIDWIDTH - mx - 10 - st - (skullAnimCounter/5), my + 152,
-			'\x1C' | highlightflags, false); // left arrow
-		V_DrawCharacter(BASEVIDWIDTH - mx + 2 + (skullAnimCounter/5), my + 152,
-			'\x1D' | highlightflags, false); // right arrow
-	}
-
-	// SRB2Kart: draw the stat backer
-	// labels
-	V_DrawThinString(statx+16, staty, V_6WIDTHSPACE|highlightflags, "Acceleration");
-	V_DrawThinString(statx+91, staty, V_6WIDTHSPACE|highlightflags, "Max Speed");
-	V_DrawThinString(statx, staty+12, V_6WIDTHSPACE|highlightflags, "Handling");
-	V_DrawThinString(statx+7, staty+77, V_6WIDTHSPACE|highlightflags, "Weight");
-	// label arrows
-	V_DrawFixedPatch((statx+64)<<FRACBITS, staty<<FRACBITS, FRACUNIT, 0, statlr, flashcol);
-	V_DrawFixedPatch((statx+24)<<FRACBITS, (staty+22)<<FRACBITS, FRACUNIT, 0, statud, flashcol);
-	// bg
-	V_DrawFixedPatch((statx+34)<<FRACBITS, (staty+10)<<FRACBITS, FRACUNIT, 0, statbg, 0);
-
-	for (i = 0; i < numskins; i++) // draw the stat dots
-	{
-		if (i != setupm_fakeskin && R_SkinAvailable(skins[i].name) != -1)
+		case SKINMENUTYPE_GRID:
+			V_DrawString(mx, my + 152, highlightflags | V_ALLOWLOWERCASE, KartColor_Names[setupm_fakecolor]); // SRB2kart
+			if (itemOn == 2)
+			{
+				V_DrawCharacter(mx - 10/* - st*/ - (skullAnimCounter/5), my + 152,
+					'\x1C' | highlightflags, false); // left arrow
+				V_DrawCharacter(mx + 2 + st + (skullAnimCounter/5), my + 152,
+					'\x1D' | highlightflags, false); // right arrow
+			}
+			break;
+		default:
+		V_DrawString(BASEVIDWIDTH - mx - st, my + 152, highlightflags|V_ALLOWLOWERCASE, KartColor_Names[setupm_fakecolor]);	// SRB2kart
+		if (itemOn == 2)
 		{
-			speed = skins[i].kartspeed;
-			weight = skins[i].kartweight;
-			V_DrawFixedPatch(((BASEVIDWIDTH - mx - 80) + ((speed-1)*8))<<FRACBITS, ((my+76) + ((weight-1)*8))<<FRACBITS, FRACUNIT, 0, statdot, NULL);
+			V_DrawCharacter(BASEVIDWIDTH - mx - 10 - st - (skullAnimCounter/5), my + 152,
+				'\x1C' | highlightflags, false); // left arrow
+			V_DrawCharacter(BASEVIDWIDTH - mx + 2 + (skullAnimCounter/5), my + 152,
+				'\x1D' | highlightflags, false); // right arrow
 		}
 	}
 
-	speed = skins[setupm_fakeskin].kartspeed;
-	weight = skins[setupm_fakeskin].kartweight;
+#define GRIDSTATOFFSET 46
 
-	statdot = W_CachePatchName("K_SDOT1", PU_CACHE);
-	if (skullAnimCounter < 4) // SRB2Kart: we draw this dot later so that it's not covered if there's multiple skins with the same stats
-		V_DrawFixedPatch(((BASEVIDWIDTH - mx - 80) + ((speed-1)*8))<<FRACBITS, ((my+76) + ((weight-1)*8))<<FRACBITS, FRACUNIT, 0, statdot, flashcol);
-	else
-		V_DrawFixedPatch(((BASEVIDWIDTH - mx - 80) + ((speed-1)*8))<<FRACBITS, ((my+76) + ((weight-1)*8))<<FRACBITS, FRACUNIT, 0, statdot, NULL);
+	// SRB2Kart: draw the stat backer
+	switch (cv_skinselectmenu.value)
+	{
+		case SKINMENUTYPE_GRID:
+			// labels
+			V_DrawSmallString(statx+40+GRIDSTATOFFSET, staty+67, V_6WIDTHSPACE|highlightflags, "Accel");
+			V_DrawSmallString(statx+76+GRIDSTATOFFSET, staty+67, V_6WIDTHSPACE|highlightflags, "Speed");
+			V_DrawSmallString(statx+14+GRIDSTATOFFSET, staty+75, V_6WIDTHSPACE|highlightflags, "Handling");
+			V_DrawSmallString(statx+21+GRIDSTATOFFSET, staty+108, V_6WIDTHSPACE|highlightflags, "Weight");
+			// label arrows
+			V_DrawFixedPatch(((statx+61+GRIDSTATOFFSET)<<FRACBITS) + (FRACUNIT>>1), (staty+67)<<FRACBITS, FRACUNIT>>1, 0, statlr, flashcol);
+			V_DrawFixedPatch((statx+40+GRIDSTATOFFSET)<<FRACBITS, (staty+80)<<FRACBITS, FRACUNIT>>1, 0, statud, flashcol);
+			// bg
+			V_DrawFixedPatch(((statx+48+GRIDSTATOFFSET)<<FRACBITS)+(FRACUNIT>>1), (staty+73)<<FRACBITS, FRACUNIT>>1, 0, statbg, 0);
 
-	statdot = W_CachePatchName("K_SDOT2", PU_CACHE); // coloured center
-	if (setupm_fakecolor)
-		V_DrawFixedPatch(((BASEVIDWIDTH - mx - 80) + ((speed-1)*8))<<FRACBITS, ((my+76) + ((weight-1)*8))<<FRACBITS, FRACUNIT, 0, statdot, R_GetTranslationColormap(0, setupm_fakecolor, GTC_MENUCACHE));
+			for (i = 0; i < numskins; i++) // draw the stat dots
+			{
+				if (R_SkinAvailable(skins[i].name) != -1)
+				{
+					speed = skins[i].kartspeed;
+					weight = skins[i].kartweight;
+					V_DrawFixedPatch((((statx+46+GRIDSTATOFFSET) + (speed*4))<<FRACBITS) + (FRACUNIT>>1), (((staty+71) + (weight*4))<<FRACBITS), FRACUNIT>>1, 0, statdot, NULL);
+				}
+			}
+
+			// gonna put the sorttype here as well
+			V_DrawSmallString(statx + 84, my + 3, V_6WIDTHSPACE|highlightflags, "Sort:");
+			V_DrawSmallString(statx + 88,  my + 7, V_6WIDTHSPACE|highlightflags, sortNames[cv_skinselectgridsort.value]);
+			if (itemOn == 1)
+				V_DrawSmallString(statx + 84,  my + 13, V_6WIDTHSPACE|highlightflags, "Backspace: change");
+
+			break;
+		default:
+			// labels
+			V_DrawThinString(statx+16, staty, V_6WIDTHSPACE|highlightflags, "Acceleration");
+			V_DrawThinString(statx+91, staty, V_6WIDTHSPACE|highlightflags, "Max Speed");
+			V_DrawThinString(statx, staty+12, V_6WIDTHSPACE|highlightflags, "Handling");
+			V_DrawThinString(statx+7, staty+77, V_6WIDTHSPACE|highlightflags, "Weight");
+			// label arrows
+			V_DrawFixedPatch((statx+64)<<FRACBITS, staty<<FRACBITS, FRACUNIT, 0, statlr, flashcol);
+			V_DrawFixedPatch((statx+24)<<FRACBITS, (staty+22)<<FRACBITS, FRACUNIT, 0, statud, flashcol);
+			// bg
+			V_DrawFixedPatch((statx+34)<<FRACBITS, (staty+10)<<FRACBITS, FRACUNIT, 0, statbg, 0);
+
+			for (i = 0; i < numskins; i++) // draw the stat dots
+			{
+				if (i != skintodisplay && R_SkinAvailable(skins[i].name) != -1)
+				{
+					speed = skins[i].kartspeed;
+					weight = skins[i].kartweight;
+					V_DrawFixedPatch(((BASEVIDWIDTH - mx - 80) + ((speed-1)*8))<<FRACBITS, ((my+76) + ((weight-1)*8))<<FRACBITS, FRACUNIT, 0, statdot, NULL);
+				}
+			}
+			break;
+	}
+
+
+
+	switch (cv_skinselectmenu.value)
+	{
+		case SKINMENUTYPE_GRID:
+			for (s = 0; s < SKINGRIDWIDTH*SKINGRIDHEIGHT; s++)
+			{
+				INT32 x = ((s % SKINGRIDWIDTH) * 18) + ((BASEVIDWIDTH / 2) - (18 * SKINGRIDWIDTH) - 8) + 100 + SKINXSHIFT; //BASEVIDWIDTH / 2 - ((icons + 1) * 24) - 4;
+				INT32 y = ((s / SKINGRIDWIDTH) * 18) + ((BASEVIDHEIGHT / 2) - (18 * (SKINGRIDWIDTH/2))); //BASEVIDWIDTH / 2 - ((icons + 1) * 24) - 4;
+				INT32 calcs = s + (setupm_skinydrag * SKINGRIDWIDTH);
+				INT16 skinn;
+				patch_t *face;
+				UINT8 *cmap;
+
+				if (calcs < numskins)
+					skinn = skinsorted[calcs];
+				else if (s % SKINGRIDWIDTH == 0)
+					break; //really conveniant place to break out here
+				else
+				{
+					V_DrawFill(x, y, 16, 16, 239);
+					continue;
+				}
+
+				face = facerankprefix[skinn];
+				cmap = R_GetTranslationColormap(skinn, skins[skinn].prefcolor, GTC_MENUCACHE);
+
+				V_DrawFixedPatch(x << FRACBITS, y << FRACBITS, FRACUNIT, 0, face, cmap);
+			}
+
+			if (itemOn == 1) //has to be on skin select part
+			{
+				patch_t *cursor;
+				INT32 curx = ((setupm_skinxpos * 18) + ((BASEVIDWIDTH / 2) - (18 * SKINGRIDWIDTH/2)) + SKINXSHIFT);
+				INT32 cury = (max(min(setupm_skinypos - setupm_skinydrag, SKINGRIDHEIGHT), 0) * 18) + ((BASEVIDHEIGHT / 2) - (18 * (SKINGRIDWIDTH/2)));
+
+				if (skintodisplay < numskins)
+				{
+					UINT8 *cmap = R_GetTranslationColormap(skintodisplay, setupm_fakecolor, GTC_MENUCACHE);
+
+					cursor = facewantprefix[skintodisplay];
+					V_DrawFixedPatch(((curx + 3) << FRACBITS), ((cury-8) << FRACBITS), FRACUNIT, 0, cursor, cmap);
+				}
+			}
+
+			// stat dot
+			speed = skins[skintodisplay].kartspeed;
+			weight = skins[skintodisplay].kartweight;
+			statdot = W_CachePatchName("K_SDOT1", PU_CACHE);
+			if (skullAnimCounter < 4) // SRB2Kart: we draw this dot later so that it's not covered if there's multiple skins with the same stats
+					V_DrawFixedPatch((((statx+46+GRIDSTATOFFSET) + (speed*4))<<FRACBITS) + (FRACUNIT>>1), (((staty+71) + (weight*4))<<FRACBITS), FRACUNIT>>1, 0, statdot, flashcol);
+				else
+					V_DrawFixedPatch((((statx+46+GRIDSTATOFFSET) + (speed*4))<<FRACBITS) + (FRACUNIT>>1), (((staty+71) + (weight*4))<<FRACBITS), FRACUNIT>>1, 0, statdot, NULL);
+
+				statdot = W_CachePatchName("K_SDOT2", PU_CACHE); // coloured center
+				if (setupm_fakecolor)
+					V_DrawFixedPatch((((statx+46+GRIDSTATOFFSET) + (speed*4))<<FRACBITS) + (FRACUNIT>>1), (((staty+71) + (weight*4))<<FRACBITS), FRACUNIT>>1, 0, statdot, R_GetTranslationColormap(0, setupm_fakecolor, GTC_MENUCACHE));
+
+			break;
+
+#undef GRIDSTATOFFSET
+#undef SKINXSHIFT
+
+		default:
+			speed = skins[skintodisplay].kartspeed;
+			weight = skins[skintodisplay].kartweight;
+
+			statdot = W_CachePatchName("K_SDOT1", PU_CACHE);
+			if (skullAnimCounter < 4) // SRB2Kart: we draw this dot later so that it's not covered if there's multiple skins with the same stats
+				V_DrawFixedPatch(((BASEVIDWIDTH - mx - 80) + ((speed-1)*8))<<FRACBITS, ((my+76) + ((weight-1)*8))<<FRACBITS, FRACUNIT, 0, statdot, flashcol);
+			else
+				V_DrawFixedPatch(((BASEVIDWIDTH - mx - 80) + ((speed-1)*8))<<FRACBITS, ((my+76) + ((weight-1)*8))<<FRACBITS, FRACUNIT, 0, statdot, NULL);
+
+			statdot = W_CachePatchName("K_SDOT2", PU_CACHE); // coloured center
+			if (setupm_fakecolor)
+				V_DrawFixedPatch(((BASEVIDWIDTH - mx - 80) + ((speed-1)*8))<<FRACBITS, ((my+76) + ((weight-1)*8))<<FRACBITS, FRACUNIT, 0, statdot, R_GetTranslationColormap(0, setupm_fakecolor, GTC_MENUCACHE));
+			break;
+	}
 
 	// 2.2 color bar backported with permission
 #define charw 72
@@ -9464,7 +9684,7 @@ static void M_DrawSetupMultiPlayerMenu(void)
 			else
 				w = indexwidth;
 			for (h = 0; h < 16; h++)
-				V_DrawFill(x, my+162+h, w, 1, colortranslations[col][h]);
+				V_DrawFill(x, my+(cv_skinselectmenu.value?176:162)+h, w, 1, colortranslations[col][h]);
 			if (++col >= MAXSKINCOLORS)
 				col -= MAXSKINCOLORS-1;
 			x += w;
@@ -9473,12 +9693,12 @@ static void M_DrawSetupMultiPlayerMenu(void)
 #undef indexwidth
 
 	// character bar, ripped off the color bar :V
-	if (setupm_fakecolor) // inverse should never happen
+	if (setupm_fakecolor && !cv_skinselectmenu.value) // inverse should never happen
 #define iconwidth 32
 	{
 		const INT32 icons = 4;
 		INT32 k = -icons;
-		INT16 col = setupm_fakeskin - icons;
+		INT16 col = skintodisplay - icons;
 		INT32 x = BASEVIDWIDTH/2 - ((icons+1)*24) - 4;
 		fixed_t scale = FRACUNIT/2;
 		INT32 offx = 8, offy = 8;
@@ -9535,8 +9755,8 @@ static void M_DrawSetupMultiPlayerMenu(void)
 	}
 
 	// skin 0 is default player sprite
-	if (R_SkinAvailable(skins[setupm_fakeskin].name) != -1)
-		sprdef = &skins[R_SkinAvailable(skins[setupm_fakeskin].name)].spritedef;
+	if (R_SkinAvailable(skins[skintodisplay].name) != -1)
+		sprdef = &skins[R_SkinAvailable(skins[skintodisplay].name)].spritedef;
 	else
 		sprdef = &skins[0].spritedef;
 
@@ -9558,13 +9778,13 @@ static void M_DrawSetupMultiPlayerMenu(void)
 	// draw player sprite
 	if (setupm_fakecolor) // inverse should never happen
 	{
-		UINT8 *colormap = R_GetTranslationColormap(setupm_fakeskin, setupm_fakecolor, GTC_MENUCACHE);
+		UINT8 *colormap = R_GetTranslationColormap(skintodisplay, setupm_fakecolor, GTC_MENUCACHE);
 
-		if (skins[setupm_fakeskin].flags & SF_HIRES)
+		if (skins[skintodisplay].flags & SF_HIRES)
 		{
 			V_DrawFixedPatch((mx+43)<<FRACBITS,
 						(my+131)<<FRACBITS,
-						skins[setupm_fakeskin].highresscale,
+						skins[skintodisplay].highresscale,
 						flags, patch, colormap);
 		}
 		else
@@ -9573,36 +9793,147 @@ static void M_DrawSetupMultiPlayerMenu(void)
 #undef charw
 }
 
+//
+// Maps a CSS grid selection cursor x and cursor y to a skin selection
+//
+int MapGridSelectToSkin(UINT8 selx, UINT8 sely)
+{
+	return (selx % SKINGRIDWIDTH) + (sely * SKINGRIDWIDTH);
+}
+
 // Handle 1P/2P MP Setup
 static void M_HandleSetupMultiPlayer(INT32 choice)
 {
 	size_t   l;
 	boolean  exitmenu = false;  // exit to previous menu and send name change
+	//UINT32  gridNextX, gridNextY = setupm_skinxpos, setupm_skinypos;
 
 	if ((choice == gamecontrol[gc_fire][0] || choice == gamecontrol[gc_fire][1]) && itemOn == 2)
 		choice = KEY_BACKSPACE; // Hack to allow resetting prefcolor on controllers
 
+//only used in callmore's "2D" skin select, could be useful for the future though
+#define BREAKWHENLOCKED {\
+	if (setupm_skinlockedselect) \
+		break; }
+
 	switch (choice)
 	{
 		case KEY_DOWNARROW:
+			if (cv_skinselectmenu.value == SKINMENUTYPE_GRID)
+			{
+				if (itemOn == 1) //if we are on the skin select menu
+				{
+					if (MapGridSelectToSkin(setupm_skinxpos, setupm_skinypos + 1) > numskins - 1)
+					{
+						if (MapGridSelectToSkin(0, setupm_skinydrag + SKINGRIDHEIGHT) <= numskins - 1)
+							setupm_skinydrag++;
+						M_NextOpt();
+					}
+					else
+					{
+						setupm_skinypos++;
+						
+						if ((setupm_skinypos - setupm_skinydrag) > SKINGRIDHEIGHT - 1)
+							setupm_skinydrag++;
+					}
+					S_StartSound(NULL, sfx_menu1);
+					break;
+				}
+				else if (itemOn == 0)
+				{
+					setupm_skinypos = setupm_skinydrag;
+					M_NextOpt();
+					S_StartSound(NULL, sfx_menu1);
+					break;
+				}
+				else
+					M_NextOpt();
+				S_StartSound(NULL, sfx_menu1); // Tails
+				break;
+			}
 			M_NextOpt();
-			S_StartSound(NULL,sfx_menu1); // Tails
+			S_StartSound(NULL, sfx_menu1); // Tails
 			break;
 
 		case KEY_UPARROW:
+			if (cv_skinselectmenu.value == SKINMENUTYPE_GRID)
+			{
+				if (itemOn == 1) //if we are on the skin select menu
+				{
+					if (setupm_skinypos == 0)
+					{
+						M_PrevOpt();
+					}
+					else
+					{
+						setupm_skinypos--;
+
+						if (setupm_skinypos < setupm_skinydrag)
+							setupm_skinydrag--;
+					}
+					S_StartSound(NULL, sfx_menu1);
+					break;
+				}
+				else if (itemOn == 2)
+				{
+					if (MapGridSelectToSkin(setupm_skinxpos, setupm_skinydrag + SKINGRIDHEIGHT - 1) >= numskins)
+					{
+						setupm_skinypos = ((numskins - 1)/SKINGRIDWIDTH);
+						if (MapGridSelectToSkin(setupm_skinxpos, setupm_skinypos) >= numskins)
+							setupm_skinypos--;
+					}
+					else
+					{
+						setupm_skinypos = setupm_skinydrag + SKINGRIDHEIGHT - 1;
+					}
+					M_PrevOpt();
+					S_StartSound(NULL, sfx_menu1);
+					break;
+				}
+				else
+				M_PrevOpt();
+				S_StartSound(NULL, sfx_menu1); // Tails
+				break;
+			}
 			M_PrevOpt();
-			S_StartSound(NULL,sfx_menu1); // Tails
+			S_StartSound(NULL, sfx_menu1); // Tails
 			break;
 
 		case KEY_LEFTARROW:
 			if (itemOn == 1)       //player skin
 			{
-				S_StartSound(NULL,sfx_menu1); // Tails
+				if (cv_skinselectmenu.value == SKINMENUTYPE_GRID)
+				{
+					if (setupm_skinxpos == 0)
+					{
+						if (MapGridSelectToSkin(SKINGRIDWIDTH - 1, setupm_skinypos) > (numskins-1))
+							setupm_skinxpos = numskins - (setupm_skinypos * SKINGRIDWIDTH) - 1;
+						else
+							setupm_skinxpos = SKINGRIDWIDTH - 1;
+						if (setupm_skinypos > 0)
+						{
+							setupm_skinxpos = SKINGRIDWIDTH - 1;
+							setupm_skinypos--;
+
+							if (setupm_skinypos < setupm_skinydrag)
+								setupm_skinydrag--;
+						}
+						
+					}
+					else
+					{
+						setupm_skinxpos--;
+					}
+					S_StartSound(NULL, sfx_menu1);
+					break;
+				}
 				setupm_fakeskin--;
+				S_StartSound(NULL, sfx_menu1); // Tails
+				break;
 			}
 			else if (itemOn == 2) // player color
 			{
-				S_StartSound(NULL,sfx_menu1); // Tails
+				S_StartSound(NULL, sfx_menu1); // Tails
 				setupm_fakecolor--;
 			}
 			break;
@@ -9610,12 +9941,32 @@ static void M_HandleSetupMultiPlayer(INT32 choice)
 		case KEY_RIGHTARROW:
 			if (itemOn == 1)       //player skin
 			{
-				S_StartSound(NULL,sfx_menu1); // Tails
+				if (cv_skinselectmenu.value == SKINMENUTYPE_GRID)
+				{
+					if ((setupm_skinxpos + 1 == SKINGRIDWIDTH) || (MapGridSelectToSkin(setupm_skinxpos + 1, setupm_skinypos) > (numskins - 1)))
+					{
+						setupm_skinxpos = 0;
+						if (MapGridSelectToSkin(setupm_skinxpos, setupm_skinypos + 1) <= (numskins - 1))
+						{
+							setupm_skinypos++;
+
+							if ((setupm_skinypos - setupm_skinydrag) > SKINGRIDHEIGHT - 1)
+								setupm_skinydrag++;
+						}
+					}
+					else
+					{
+						setupm_skinxpos++;
+					}
+					S_StartSound(NULL, sfx_menu1);
+					break;
+				}
 				setupm_fakeskin++;
+				S_StartSound(NULL, sfx_menu1); // Tails
 			}
 			else if (itemOn == 2) // player color
 			{
-				S_StartSound(NULL,sfx_menu1); // Tails
+				S_StartSound(NULL, sfx_menu1); // Tails
 				setupm_fakecolor++;
 			}
 			break;
@@ -9629,16 +9980,25 @@ static void M_HandleSetupMultiPlayer(INT32 choice)
 			{
 				if ((l = strlen(setupm_name))!=0)
 				{
-					S_StartSound(NULL,sfx_menu1); // Tails
+					S_StartSound(NULL, sfx_menu1); // Tails
 					setupm_name[l-1] =0;
 				}
+			}
+			else if (cv_skinselectmenu.value == SKINMENUTYPE_GRID && itemOn == 1)
+			{
+				// change sort for select menu (damn now i have to add another cvar...)
+				// now we have the cvar
+				// time to :shitsfree:
+				CV_StealthSetValue(&cv_skinselectgridsort, (cv_skinselectgridsort.value+1)%MAXSKINMENUSORTS);
+				SortSkinGrid();
+				S_StartSound(NULL, sfx_menu1);
 			}
 			else if (itemOn == 2)
 			{
 				UINT8 col = skins[setupm_fakeskin].prefcolor;
 				if (setupm_fakecolor != col)
 				{
-					S_StartSound(NULL,sfx_menu1); // Tails
+					S_StartSound(NULL, sfx_menu1); // Tails
 					setupm_fakecolor = col;
 				}
 			}
@@ -9647,10 +10007,53 @@ static void M_HandleSetupMultiPlayer(INT32 choice)
 		case KEY_DEL:
 			if (itemOn == 0 && (l = strlen(setupm_name))!=0)
 			{
-				S_StartSound(NULL,sfx_menu1); // Tails
+				S_StartSound(NULL, sfx_menu1); // Tails
 				setupm_name[0] = 0;
 			}
 			break;
+		
+		case KEY_PGDN:
+			if (cv_skinselectmenu.value == SKINMENUTYPE_GRID)
+			{
+				if (itemOn == 1) //if we are on the skin select menu
+				{
+					if (MapGridSelectToSkin(0, setupm_skinydrag + SKINGRIDHEIGHT) <= numskins - 1)
+					{
+						S_StartSound(NULL, sfx_menu1);
+						setupm_skinydrag++;
+						if (setupm_skinypos < setupm_skinydrag)
+							setupm_skinypos++;
+						if (MapGridSelectToSkin(setupm_skinxpos, setupm_skinypos) > numskins - 1)
+							setupm_skinxpos = 0;
+					}
+				}
+			}
+			break;
+
+		case KEY_PGUP:
+			if (cv_skinselectmenu.value == SKINMENUTYPE_GRID)
+			{
+				if (itemOn == 1) //if we are on the skin select menu
+				{
+					if (setupm_skinydrag)
+					{
+						S_StartSound(NULL, sfx_menu1);
+						setupm_skinydrag--;
+						if (setupm_skinypos >= setupm_skinydrag + SKINGRIDHEIGHT)
+							setupm_skinypos--;
+					}
+				}
+			}
+			break;
+
+		case KEY_ENTER:
+			if (cv_skinselectmenu.value == SKINMENUTYPE_GRID && itemOn == 1 && setupm_skinselect < numskins)
+			{
+				setupm_fakeskin = skinsorted[MapGridSelectToSkin(setupm_skinxpos, setupm_skinypos)];
+				S_StartSound(NULL, sfx_s221);
+			}
+			break;
+
 
 		default:
 			if (choice < 32 || choice > 127 || itemOn != 0)
@@ -9658,7 +10061,7 @@ static void M_HandleSetupMultiPlayer(INT32 choice)
 			l = strlen(setupm_name);
 			if (l < MAXPLAYERNAME)
 			{
-				S_StartSound(NULL,sfx_menu1); // Tails
+				S_StartSound(NULL, sfx_menu1); // Tails
 				setupm_name[l] =(char)choice;
 				setupm_name[l+1] =0;
 			}
@@ -9666,6 +10069,9 @@ static void M_HandleSetupMultiPlayer(INT32 choice)
 	}
 
 	// check skin
+	if (cv_skinselectmenu.value == SKINMENUTYPE_GRID && !exitmenu)
+		setupm_skinselect = skinsorted[MapGridSelectToSkin(setupm_skinxpos, setupm_skinypos)];
+
 	if (setupm_fakeskin < 0)
 		setupm_fakeskin = numskins-1;
 	if (setupm_fakeskin > numskins-1)
@@ -9686,6 +10092,25 @@ static void M_HandleSetupMultiPlayer(INT32 choice)
 	}
 }
 
+#define SKINSELECTMENUEDIT \
+{\
+switch (cv_skinselectmenu.value)\
+{\
+case SKINMENUTYPE_GRID:\
+	MP_PlayerSetupMenu[0].alphaKey = 6;\
+	MP_PlayerSetupMenu[1].alphaKey = 25;\
+	MP_PlayerSetupMenu[2].alphaKey = 164;\
+	MP_PlayerSetupDef.y = 6;\
+	break;\
+default:\
+	MP_PlayerSetupMenu[0].alphaKey = 0;\
+	MP_PlayerSetupMenu[1].alphaKey = 16;\
+	MP_PlayerSetupMenu[2].alphaKey = 152;\
+	MP_PlayerSetupDef.y = 14;\
+	break;\
+}\
+}
+
 // start the multiplayer setup menu
 static void M_SetupMultiPlayer(INT32 choice)
 {
@@ -9700,6 +10125,9 @@ static void M_SetupMultiPlayer(INT32 choice)
 	setupm_cvskin = &cv_skin;
 	setupm_cvcolor = &cv_playercolor;
 	setupm_cvname = &cv_playername;
+	setupm_skinxpos = 4;
+	setupm_skinypos, setupm_skinydrag = 0;
+	setupm_skinlockedselect = false;
 
 	// For whatever reason this doesn't work right if you just use ->value
 	setupm_fakeskin = R_SkinAvailable(setupm_cvskin->string);
@@ -9712,6 +10140,9 @@ static void M_SetupMultiPlayer(INT32 choice)
 		MP_PlayerSetupMenu[2].status = (IT_GRAYEDOUT);
 	else
 		MP_PlayerSetupMenu[2].status = (IT_KEYHANDLER|IT_STRING);
+
+	//change the y offsets of the menu depending on cvar settings
+	SKINSELECTMENUEDIT
 
 	MP_PlayerSetupDef.prevMenu = currentMenu;
 	M_SetupNextMenu(&MP_PlayerSetupDef);
@@ -9731,6 +10162,9 @@ static void M_SetupMultiPlayer2(INT32 choice)
 	setupm_cvskin = &cv_skin2;
 	setupm_cvcolor = &cv_playercolor2;
 	setupm_cvname = &cv_playername2;
+	setupm_skinxpos = 4;
+	setupm_skinypos, setupm_skinydrag = 0;
+	setupm_skinlockedselect = false;
 
 	// For whatever reason this doesn't work right if you just use ->value
 	setupm_fakeskin = R_SkinAvailable(setupm_cvskin->string);
@@ -9743,6 +10177,9 @@ static void M_SetupMultiPlayer2(INT32 choice)
 		MP_PlayerSetupMenu[2].status = (IT_GRAYEDOUT);
 	else
 		MP_PlayerSetupMenu[2].status = (IT_KEYHANDLER | IT_STRING);
+
+	//change the y offsets of the menu depending on cvar settings
+		SKINSELECTMENUEDIT
 
 	MP_PlayerSetupDef.prevMenu = currentMenu;
 	M_SetupNextMenu(&MP_PlayerSetupDef);
@@ -9762,6 +10199,9 @@ static void M_SetupMultiPlayer3(INT32 choice)
 	setupm_cvskin = &cv_skin3;
 	setupm_cvcolor = &cv_playercolor3;
 	setupm_cvname = &cv_playername3;
+	setupm_skinxpos = 4;
+	setupm_skinypos, setupm_skinydrag = 0;
+	setupm_skinlockedselect = false;
 
 	// For whatever reason this doesn't work right if you just use ->value
 	setupm_fakeskin = R_SkinAvailable(setupm_cvskin->string);
@@ -9774,6 +10214,9 @@ static void M_SetupMultiPlayer3(INT32 choice)
 		MP_PlayerSetupMenu[2].status = (IT_GRAYEDOUT);
 	else
 		MP_PlayerSetupMenu[2].status = (IT_KEYHANDLER | IT_STRING);
+
+	//change the y offsets of the menu depending on cvar settings
+	SKINSELECTMENUEDIT
 
 	MP_PlayerSetupDef.prevMenu = currentMenu;
 	M_SetupNextMenu(&MP_PlayerSetupDef);
@@ -9793,6 +10236,9 @@ static void M_SetupMultiPlayer4(INT32 choice)
 	setupm_cvskin = &cv_skin4;
 	setupm_cvcolor = &cv_playercolor4;
 	setupm_cvname = &cv_playername4;
+	setupm_skinxpos = 4;
+	setupm_skinypos, setupm_skinydrag = 0;
+	setupm_skinlockedselect = false;
 
 	// For whatever reason this doesn't work right if you just use ->value
 	setupm_fakeskin = R_SkinAvailable(setupm_cvskin->string);
@@ -9805,6 +10251,9 @@ static void M_SetupMultiPlayer4(INT32 choice)
 		MP_PlayerSetupMenu[2].status = (IT_GRAYEDOUT);
 	else
 		MP_PlayerSetupMenu[2].status = (IT_KEYHANDLER | IT_STRING);
+
+	//change the y offsets of the menu depending on cvar settings
+	SKINSELECTMENUEDIT
 
 	MP_PlayerSetupDef.prevMenu = currentMenu;
 	M_SetupNextMenu(&MP_PlayerSetupDef);

@@ -2511,6 +2511,9 @@ void R_DrawMasked(void)
 
 INT32 numskins = 0;
 skin_t skins[MAXSKINS];
+
+UINT8 skinsorted[MAXSKINS];
+
 // FIXTHIS: don't work because it must be inistilised before the config load
 //#define SKINVALUES
 #ifdef SKINVALUES
@@ -2573,6 +2576,7 @@ void R_InitSkins(void)
 	skin = &skins[0];
 	numskins = 1;
 	Sk_SetDefaultValue(skin);
+	memset(skinsorted, 0, sizeof(skinsorted));
 
 	// Hardcoded S_SKIN customizations for Sonic.
 	strcpy(skin->name,       DEFAULTSKIN);
@@ -2719,6 +2723,117 @@ static UINT16 W_CheckForSkinMarkerInPwad(UINT16 wadid, UINT16 startlump)
 				return i;
 	}
 	return INT16_MAX; // not found
+}
+
+//
+// From callmore's skin select
+// Sort function for sorting skin names
+//
+static int CompareSkins(const void *a, const void *b)
+{
+	const skin_t *in1 = &skins[*(const UINT8 *)a];
+	const skin_t *in2 = &skins[*(const UINT8 *)b];
+	INT32 temp = 0;
+	const UINT8 val_a = *((const UINT8 *)a);
+	const UINT8 val_b = *((const UINT8 *)b);
+	
+	switch (cv_skinselectgridsort.value)
+	{
+	case SKINMENUSORT_REALNAME:
+		//CONS_Printf("Sorting by realname\n");
+		// check name
+		if ((temp = strcmp(in1->realname, in2->realname)))
+			return temp;
+		// sort by internal name
+		return strcmp(in1->name, in2->name);
+		break;
+
+	case SKINMENUSORT_NAME:
+		//CONS_Printf("Sorting by name\n");
+		return strcmp(in1->name, in2->name);
+		break;
+
+	case SKINMENUSORT_SPEED:
+		//CONS_Printf("Sorting by speed\n");
+		// check speed
+		if (in1->kartspeed < in2->kartspeed)
+			return -1;
+		else if (in2->kartspeed < in1->kartspeed)
+			return 1;
+		// then check weight
+		if (in1->kartweight < in2->kartweight)
+			return -1;
+		else if (in2->kartweight < in1->kartweight)
+			return 1;
+		// then check name
+		if ((temp = strcmp(in1->realname, in2->realname)))
+			return temp;
+		// sort by internal name
+		return strcmp(in1->name, in2->name);
+		break;
+
+	case SKINMENUSORT_WEIGHT:
+		//CONS_Printf("Sorting by weight\n");
+		// check weight
+		if (in1->kartweight < in2->kartweight)
+			return -1;
+		else if (in2->kartweight < in1->kartweight)
+			return 1;
+		// then check speed
+		if (in1->kartspeed < in2->kartspeed)
+			return -1;
+		else if (in2->kartspeed < in1->kartspeed)
+			return 1;
+		// then check name
+		if ((temp = strcmp(in1->realname, in2->realname)))
+			return temp;
+		// sort by internal name
+		return strcmp(in1->name, in2->name);
+		break;
+
+	case SKINMENUSORT_PREFCOLOR:
+		//CONS_Printf("Sorting by prefcolor\n");
+		// check prefcolor
+		if (in1->prefcolor < in2->prefcolor)
+			return -1;
+		else if (in2->prefcolor < in1->prefcolor)
+			return 1;
+		// then check name
+		if ((temp = strcmp(in1->realname, in2->realname)))
+			return temp;
+		// sort by internal name
+		return strcmp(in1->name, in2->name);
+		break;
+
+	case SKINMENUSORT_ID:
+		//CONS_Printf("Sorting by id\n");
+		//how do i do by ID?????
+		//wait why dont i just convert the inputs to UINT32s
+		//please tell me im allowed to define variables in here since its a block
+		//looks like it was "no" lmao
+
+		if (val_a == val_b)
+			return 0;
+		else if (val_a < val_b)
+			return -1;
+		else
+			return 1;
+
+	default:
+		return strcmp(in1->name, in2->name);
+		break;
+	}
+	//im scared this somehow will sometimes end up here so im gonna add this here just to be safe
+	return strcmp(in1->name, in2->name);
+}
+
+//
+// Sorts the CSS grid
+//
+void SortSkinGrid(void)
+{
+	CONS_Printf("Sorting skin list (sort type %d)...\n", cv_skinselectgridsort.value);
+	qsort(skinsorted, numskins, sizeof(UINT8), CompareSkins);
 }
 
 //
@@ -2999,8 +3114,13 @@ next_token:
 			HWR_AddPlayerMD2(numskins);
 #endif
 
+		skinsorted[numskins] = numskins;
+
 		numskins++;
 	}
+
+	SortSkinGrid();
+
 	return;
 }
 

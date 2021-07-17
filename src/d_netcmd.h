@@ -151,6 +151,29 @@ extern consvar_t cv_skipmapcheck;
 
 extern consvar_t cv_sleep;
 
+//taken from callmore with permission
+typedef enum
+{
+	SKINMENUTYPE_SCROLL = 0,
+	SKINMENUTYPE_GRID   // 1
+} skinmenutype_t;
+
+typedef enum
+{
+	SKINMENUSORT_REALNAME = 0,
+	SKINMENUSORT_NAME, // 1
+	SKINMENUSORT_SPEED, // 2
+	SKINMENUSORT_WEIGHT, // 3
+	//sigh
+	//SKINMENUSORT_STAT,
+	SKINMENUSORT_PREFCOLOR, // 4
+	SKINMENUSORT_ID, // 5
+	MAXSKINMENUSORTS // 6
+} skinmenusort_t;
+
+extern consvar_t cv_skinselectmenu;
+extern consvar_t cv_skinselectgridsort;
+
 typedef enum
 {
 	XD_NAMEANDCOLOR = 1,
